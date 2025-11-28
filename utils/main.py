@@ -59,11 +59,14 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_movie))
     app.add_handler(CallbackQueryHandler(button_callback))
     
+    # ورسل جدید: به جای VERCEL_URL از دامنه اصلی استفاده می‌کنیم
+    webhook_url = f"https://movie-bot-eosin-theta.vercel.app"
+    
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8000)),
         url_path=TOKEN,
-        webhook_url=f"https://{os.environ['VERCEL_URL']}/{TOKEN}"
+        webhook_url=webhook_url + "/" + TOKEN
     )
 
 if __name__ == "__main__":
