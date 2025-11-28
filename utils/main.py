@@ -1,63 +1,58 @@
+import json
 import os
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from utils.scraper import search_psarips, get_links_from_page
 
-TOKEN = os.environ.get("BOT_TOKEN")
-DOMAIN = "movie-bot-eosin-theta.vercel.app"  # ← دقیقاً همین دامنه خودت
+TOKEN = os.environ["BOT_TOKEN"]
+URL = "https://movie-bot-eosin-theta.vercel.app"   # ← دامنه خودت
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎬 سلام! اسم فیلم یا سریال رو بفرست تا لینک مستقیم بدم\n"
-        "مثال: Breaking Bad S01E01 یا Oppenheimer"
-    )
+application = Application.builder().token(TOKEN).build()
 
-async def search_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.strip()
+# هندلرها
+async def start(update: Update, context):
+    await update.message.reply_text("🎬 سلام!\nاسم فیلم یا سریال رو بفرست تا لینک مستقیم بدم")
+
+async def search(update: Update, context):
+    query = update.message.text
     await update.message.reply_chat_action("typing")
     results = search_psarips(query)
-    
     if not results:
-        await update.message.reply_text("چیزی پیدا نشد 😔\nبا اسم دقیق‌تر امتحان کن")
+        await update.message.reply_text("چیزی پیدا نشد 😔")
         return
+    keyboard = [[InlineKeyboardButton(r["title"][:60], callback_data=f"sel_{r['link']}")] for r in results[:10]]
+    await update.message.reply_text("نتایج:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    keyboard = [[InlineKeyboardButton(res["title"][:60], callback_data=f"movie_{res['link']}")] for res in results]
-    await update.message.reply_text("نتایج جستجو:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data.startswith("movie_"):
-        url = query.data.replace("movie_", "")
-        await query.edit_message_text("در حال گرفتن لینک‌ها... ⏳")
-        links = get_links_from_page(url)
-        
+async def button(update: Update, context):
+    q = update.callback_query
+    await q.answer()
+    if q.data.startswith("sel_"):
+        page_url = q.data[4:]
+        await q.edit_message_text("در حال گرفتن لینک‌ها... ⏳")
+        links = get_links_from_page(page_url)
         if not links:
-            await query.edit_message_text("لینک مستقیمی پیدا نشد 😢")
+            await q.edit_message_text("لینک پیدا نشد 😢")
             return
-            
         text = "لینک‌های دانلود:\n\n"
         keyboard = []
         for i, link in enumerate(links, 1):
             text += f"{i}. {link}\n\n"
             keyboard.append([InlineKeyboardButton(f"لینک {i}", url=link)])
-        
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), disable_web_page_preview=True)
+        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), disable_web_page_preview=True)
 
-# این قسمت جدید و مخصوص ورسل هست
-def handler(event, context=None):
-    application = Application.builder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_movie))
-    application.add_handler(CallbackQueryHandler(button_callback))
-    
-    # وقتی ورسل درخواست می‌فرسته، این اجرا می‌شه
-    return application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8000)),
-        url_path=TOKEN,
-        webhook_url=f"https://{DOMAIN}/{TOKEN}",
-        event=event
-    )
+# اضافه کردن هندلرها
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
+application.add_handler(CallbackQueryHandler(button))
+
+# این تابع دقیقاً همون چیزیه که ورسل می‌خواد
+async def handler(event, context):
+    body = json.loads(event["body"])
+    update = Update.de_json(body, application.bot)
+    await application.process_update(update)
+    return {"statusCode": 200, "body": "ok"}
+
+# ورسل این تابع رو صدا می‌زنه
+def main(event, context):
+    import asyncio
+    return asyncio.get_event_loop().run_until_complete(handler(event, context))
